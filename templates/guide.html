@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Blind Assist - Guide Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0d1117;color:#e6e6e6;height:100vh;overflow:hidden}
+.tabs{display:flex;background:#161b22;border-bottom:2px solid #30363d}
+.tab{padding:12px 24px;cursor:pointer;font-size:14px;font-weight:bold;color:#8b949e;border-bottom:3px solid transparent;transition:all 0.2s}
+.tab.active{color:#58a6ff;border-bottom-color:#58a6ff;background:#0d1117}
+.tab:hover{color:#c9d1d9}
+.tab-content{display:none;height:calc(100vh - 47px);overflow:hidden}
+.tab-content.active{display:block}
+
+/* TAB 1: LIVE STREAM */
+.live-tab{display:flex;flex-direction:row;height:100%}
+.live-video{flex:1;background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.live-video img{width:100%;height:100%;object-fit:contain}
+.live-video canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.no-feed{color:#484f58;font-size:18px;text-align:center}
+.risk-bar{position:absolute;top:10px;left:10px;right:10px;padding:8px;border-radius:6px;text-align:center;font-weight:bold;font-size:14px;z-index:5}
+.risk-bar.safe{background:rgba(56,142,60,0.85)}.risk-bar.warning{background:rgba(230,81,0,0.85)}.risk-bar.danger{background:rgba(183,28,28,0.9)}
+.trajectory-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:18px;font-weight:bold;z-index:5;display:none;text-align:center}
+.trajectory-bar.critical{background:rgba(183,28,28,0.9);border:2px solid #f44336}
+.trajectory-bar.high{background:rgba(230,81,0,0.9);border:2px solid #ff5722}
+.trajectory-bar.medium{background:rgba(245,127,23,0.85);border:2px solid #ff9800}
+
+.side-panel{width:280px;background:#161b22;padding:10px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;border-left:1px solid #30363d}
+.section{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px}
+.section h3{font-size:10px;color:#58a6ff;margin-bottom:5px;text-transform:uppercase;letter-spacing:1px}
+.cmds{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cmd{padding:8px;border:none;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;color:#fff}
+.cmd:hover{opacity:0.8}
+.red{background:#da3633}.orange{background:#d29922}.green{background:#238636}.blue{background:#1f6feb}
+.msg-box{display:flex;gap:4px}
+.msg-box input{flex:1;padding:6px;border:1px solid #30363d;border-radius:4px;background:#0d1117;color:#e6e6e6;font-size:12px}
+.msg-box button{padding:6px 10px;background:#238636;color:#fff;border:none;border-radius:4px;font-weight:bold;cursor:pointer}
+.det-list{font-size:11px}.det-item{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #21262d}
+
+/* TAB 2: SCENE ANALYSIS */
+.analysis-tab{flex-direction:column;padding:15px;gap:15px;overflow-y:auto}
+.analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;flex:1}
+.analysis-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;overflow-y:auto}
+.analysis-card h3{font-size:12px;color:#58a6ff;margin-bottom:8px;text-transform:uppercase}
+.shapley-bar{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}
+.shapley-bar .bar{height:8px;border-radius:4px;background:#1f6feb;transition:width 0.3s}
+.shapley-bar .label{width:70px;text-align:right;color:#8b949e}
+.shapley-bar .val{width:35px;color:#58a6ff}
+.advisory-text{font-size:12px;line-height:1.6;white-space:pre-wrap;color:#c9d1d9}
+.comm-issue{background:#da363322;border:1px solid #da3633;border-radius:4px;padding:6px;margin:4px 0;font-size:11px}
+.comm-ok{background:#23863622;border:1px solid #238636;border-radius:4px;padding:6px;margin:4px 0;font-size:11px}
+.analyze-btn{padding:12px 24px;background:#1f6feb;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:bold;cursor:pointer;align-self:flex-start}
+.analyze-btn:hover{background:#388bfd}
+.analyze-btn:disabled{background:#30363d;cursor:wait}
+.decision-entry{border-bottom:1px solid #21262d;padding:4px 0;font-size:11px}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.status-dot.on{background:#3fb950}.status-dot.off{background:#f85149}
+</style>
+</head><body>
+<div class="tabs">
+<div class="tab active" onclick="switchTab('live')">📹 Live Stream</div>
+<div class="tab" onclick="switchTab('analysis')">🧠 Scene Analysis & XAI</div>
+<div style="margin-left:auto;padding:12px;font-size:12px"><span class="status-dot off" id="dot"></span>Phone</div>
+</div>
+
+<!-- TAB 1: LIVE STREAM -->
+<div class="tab-content active" id="tab-live">
+<div class="live-tab">
+<div class="live-video">
+<div class="no-feed" id="noFeed">Waiting for phone...<br><br>Open phone page to connect</div>
+<img id="frame" style="display:none"><canvas id="overlay"></canvas>
+<div class="risk-bar safe" id="riskBar" style="display:none"></div>
+<div class="trajectory-bar" id="trajBar"></div>
+</div>
+<div class="side-panel">
+<div class="section"><h3>Quick Guidance</h3><div class="cmds">
+<button class="cmd red" onclick="send('Stop! Danger ahead!','critical')">🛑 STOP</button>
+<button class="cmd orange" onclick="send('Slow down','high')">⚠️ SLOW</button>
+<button class="cmd blue" onclick="send('Move left','high')">⬅️ LEFT</button>
+<button class="cmd blue" onclick="send('Move right','high')">➡️ RIGHT</button>
+<button class="cmd green" onclick="send('Path clear, continue','normal')">✅ CLEAR</button>
+<button class="cmd orange" onclick="send('Stairs ahead','high')">🪜 STAIRS</button>
+</div></div>
+<div class="section"><h3>Message</h3><div class="msg-box">
+<input id="msg" placeholder="Type guidance..." onkeypress="if(event.key==='Enter')sendC()">
+<button onclick="sendC()">Send</button></div></div>
+<div class="section"><h3>Detections</h3><div class="det-list" id="dets"><span style="color:#484f58">No detections</span></div></div>
+</div>
+</div>
+</div>
+
+<!-- TAB 2: SCENE ANALYSIS -->
+<div class="tab-content" id="tab-analysis">
+<div class="analysis-tab">
+<div style="display:flex;gap:10px;align-items:center;padding:4px 0">
+<span style="font-size:13px;color:#3fb950">● GPT-4o streaming automatically for each frame</span>
+<span id="analyzeStatus" style="font-size:12px;color:#8b949e"></span>
+</div>
+<div class="analysis-grid">
+<!-- Shapley Attribution -->
+<div class="analysis-card">
+<h3>📊 Shapley Attribution (Feature Importance)</h3>
+<div id="shapleyChart">
+<p style="color:#484f58;font-size:12px">Waiting for detections...</p>
+</div>
+</div>
+<!-- Communication Patterns -->
+<div class="analysis-card">
+<h3>📡 Communication Pattern Analysis</h3>
+<div id="commPatterns">
+<p style="color:#484f58;font-size:12px">Tracking warning patterns...</p>
+</div>
+</div>
+<!-- Decision Log -->
+<div class="analysis-card">
+<h3>📋 Decision Log (Explainable AI)</h3>
+<div id="decisionLog" style="max-height:250px;overflow-y:auto">
+<p style="color:#484f58;font-size:12px">No decisions yet...</p>
+</div>
+</div>
+<!-- GPT Advisory -->
+<div class="analysis-card">
+<h3>🤖 GPT-4o Live Stream (auto for each frame)</h3>
+<div id="gptAdvisory" style="max-height:300px;overflow-y:auto">
+<p style="color:#484f58;font-size:12px">Waiting for detections to start streaming...</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<script>
+// ===== MAIN APP =====
+let ws,fc=0,lt=Date.now(),detections=[];
+const colors={critical:'#f85149',high:'#d29922',medium:'#d29922',low:'#3fb950'};
+
+function switchTab(tab){
+document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===(tab==='live'?0:1)));
+document.getElementById('tab-live').classList.toggle('active',tab==='live');
+document.getElementById('tab-analysis').classList.toggle('active',tab==='analysis');
+if(tab==='analysis')loadShapleyData();
+}
+
+function connect(){
+const p=location.protocol==='https:'?'wss:':'ws:';
+ws=new WebSocket(p+'//'+location.host+'/ws/guide');
+ws.onmessage=(e)=>handle(JSON.parse(e.data));
+ws.onclose=()=>setTimeout(connect,2000);ws.onerror=()=>ws.close();
+}
+connect();
+
+function handle(m){
+if(m.type==='frame')showFrame(m);
+if(m.type==='phone_status')phoneStatus(m.data);
+if(m.type==='detections'&&m.data&&m.data.objects)showDetections(m.data.objects);
+}
+
+function showFrame(m){
+const img=document.getElementById('frame');
+document.getElementById('noFeed').style.display='none';
+img.style.display='block';
+img.src='data:image/jpeg;base64,'+m.data;
+img.onload=()=>{const c=document.getElementById('overlay');c.width=img.naturalWidth;c.height=img.naturalHeight;drawOverlay();};
+fc++;const n=Date.now();if(n-lt>=1000){lt=n;fc=0;}
+}
+
+function showDetections(objs){
+detections=objs;drawOverlay();updateDets();updateRisk();updateTraj();
+}
+
+function drawOverlay(){
+const c=document.getElementById('overlay'),ctx=c.getContext('2d');
+if(!c.width)return;ctx.clearRect(0,0,c.width,c.height);
+const threats=detections.filter(o=>o.risk!=='low');
+if(threats.length>0){
+ctx.fillStyle='rgba(76,175,80,0.08)';
+if(!threats.some(o=>o.direction==='left'))ctx.fillRect(0,c.height*0.4,c.width*0.33,c.height*0.6);
+if(!threats.some(o=>o.direction==='center'))ctx.fillRect(c.width*0.33,c.height*0.4,c.width*0.34,c.height*0.6);
+if(!threats.some(o=>o.direction==='right'))ctx.fillRect(c.width*0.67,c.height*0.4,c.width*0.33,c.height*0.6);
+}
+for(const obj of detections){
+if(obj.risk==='low')continue;
+const color=colors[obj.risk]||'#3fb950';
+const cx_norm=obj.cx||0.5;
+const x=(cx_norm-0.1)*c.width,y=c.height*0.25,w=c.width*0.2,h=c.height*0.5;
+ctx.strokeStyle=color;ctx.lineWidth=obj.risk==='critical'?5:3;ctx.strokeRect(x,y,w,h);
+if(obj.risk==='critical'||obj.risk==='high'){ctx.fillStyle=color+'22';ctx.fillRect(x,y,w,h);}
+ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(x,y-20,150,18);
+ctx.fillStyle=color;ctx.font='bold 12px sans-serif';
+ctx.fillText(obj.label+' • '+obj.dist,x+4,y-6);
+}
+}
+
+function updateDets(){
+const el=document.getElementById('dets');
+if(!detections.length){el.innerHTML='<span style="color:#3fb950">✓ Path clear</span>';return;}
+el.innerHTML=detections.filter(o=>o.risk!=='low').map(o=>'<div class="det-item"><span style="color:'+colors[o.risk]+'">'+o.label+'</span><span style="color:'+colors[o.risk]+'">'+o.dist+' | '+o.direction+'</span></div>').join('')||'<span style="color:#3fb950">✓ Clear</span>';
+}
+function updateRisk(){
+const bar=document.getElementById('riskBar');bar.style.display='block';
+if(!detections.length||!detections.some(o=>o.risk!=='low')){bar.textContent='PATH CLEAR ✓';bar.className='risk-bar safe';}
+else if(detections.some(o=>o.risk==='critical')){bar.textContent='⚠️ DANGER!';bar.className='risk-bar danger';}
+else if(detections.some(o=>o.risk==='high')){bar.textContent='⚠️ WARNING';bar.className='risk-bar warning';}
+else{bar.textContent='SCANNING';bar.className='risk-bar safe';}
+}
+function updateTraj(){
+const el=document.getElementById('trajBar');
+const top=detections.filter(o=>o.risk!=='low').sort((a,b)=>(a.risk==='critical'?4:a.risk==='high'?3:2)-(b.risk==='critical'?4:b.risk==='high'?3:2)).reverse()[0];
+if(!top){el.style.display='none';return;}
+let arrow=top.direction==='left'?'➡️ Move Right':top.direction==='right'?'⬅️ Move Left':top.risk==='critical'?'🛑 STOP!':'⚠️ Slow Down';
+el.innerHTML=arrow+'<br><span style="font-size:12px">'+top.label+' • '+top.dist+'</span>';
+el.className='trajectory-bar '+top.risk;el.style.display='block';
+}
+
+function phoneStatus(d){
+document.getElementById('dot').className='status-dot '+(d.connected?'on':'off');
+if(!d.connected){document.getElementById('noFeed').style.display='block';document.getElementById('frame').style.display='none';}
+}
+
+function send(t,p){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'guidance',text:t,priority:p}));}
+function sendC(){const t=document.getElementById('msg').value.trim();if(t){send(t,'normal');document.getElementById('msg').value='';}}
+
+// ===== TAB 2: Scene Analysis =====
+async function loadShapleyData(){
+try{
+const r=await fetch('/api/shapley');const d=await r.json();
+renderShapley(d.recent);renderComm(d.communication);renderDecisions(d.decisions);
+}catch(e){console.error(e);}
+}
+
+function renderShapley(data){
+const el=document.getElementById('shapleyChart');
+if(!data||!data.length){el.innerHTML='<p style="color:#484f58;font-size:12px">No attribution data yet</p>';return;}
+const latest=data[data.length-1];
+const sv=latest.shapley_values||{};
+el.innerHTML=Object.entries(sv).map(([k,v])=>'<div class="shapley-bar"><span class="label">'+k+'</span><div style="flex:1;background:#21262d;border-radius:4px;height:8px"><div class="bar" style="width:'+Math.round(v*100)+'%"></div></div><span class="val">'+Math.round(v*100)+'%</span></div>').join('')
++'<div style="margin-top:8px;padding:6px;background:#0d1117;border-radius:4px;font-size:11px"><b>Top contributor:</b> '+latest.top_contributor+'<br><b>Explanation:</b> '+latest.explanation+'</div>';
+}
+
+function renderComm(data){
+const el=document.getElementById('commPatterns');
+if(!data){el.innerHTML='<p style="color:#484f58">No data</p>';return;}
+let html='<div style="font-size:11px;margin-bottom:6px">Total warnings: <b>'+data.total_warnings+'</b></div>';
+if(data.patterns&&data.patterns.length>0){
+html+=data.patterns.map(p=>'<div class="comm-issue"><b>'+p.issue+':</b> '+p.detail+'</div>').join('');
+}else{html+='<div class="comm-ok">✓ Communication patterns healthy</div>';}
+html+='<div style="margin-top:6px;padding:6px;background:#0d1117;border-radius:4px;font-size:11px"><b>Recommendation:</b> '+data.recommendation+'</div>';
+el.innerHTML=html;
+}
+
+function renderDecisions(data){
+const el=document.getElementById('decisionLog');
+if(!data||!data.length){el.innerHTML='<p style="color:#484f58">No decisions</p>';return;}
+el.innerHTML=data.slice(-10).reverse().map(d=>'<div class="decision-entry"><span style="color:#8b949e">'+d.time_str+'</span> <span style="color:'+colors[d.risk_level]+'">'+d.risk_level.toUpperCase()+'</span> '+d.detection.label+' '+d.detection.distance+' '+d.detection.direction+'<br><span style="color:#8b949e;font-size:10px">→ '+d.shapley.explanation+'</span></div>').join('');
+}
+
+// ===== GPT STREAMING WebSocket =====
+let gptWs;
+function connectGPT(){
+const p=location.protocol==='https:'?'wss:':'ws:';
+gptWs=new WebSocket(p+'//'+location.host+'/ws/gpt-stream');
+gptWs.onmessage=(e)=>{
+    const m=JSON.parse(e.data);
+    const el=document.getElementById('gptAdvisory');
+    if(m.type==='gpt_chunk'){
+        if(!el.dataset.streaming){el.innerHTML='';el.dataset.streaming='1';}
+        el.innerHTML+=m.text.replace(/\n/g,'<br>');
+        el.scrollTop=el.scrollHeight;
+        document.getElementById('analyzeStatus').textContent='⚡ Streaming...';
+    }
+    if(m.type==='gpt_done'){
+        el.dataset.streaming='';
+        el.innerHTML+='<hr style="border-color:#30363d;margin:8px 0"><span style="color:#8b949e;font-size:10px">'+new Date().toLocaleTimeString()+'</span>';
+        document.getElementById('analyzeStatus').textContent='✓ Last: '+new Date().toLocaleTimeString();
+        loadShapleyData();
+    }
+    if(m.type==='gpt_error'){
+        el.innerHTML+='<div style="color:#f85149;margin-top:6px">'+m.text+'</div>';
+        el.dataset.streaming='';
+    }
+};
+gptWs.onclose=()=>setTimeout(connectGPT,3000);
+gptWs.onerror=()=>gptWs.close();
+}
+connectGPT();
+
+// Auto-refresh analysis tab every 5s when active
+setInterval(()=>{if(document.getElementById('tab-analysis').classList.contains('active'))loadShapleyData();},5000);
+</script>
+</body></html>
