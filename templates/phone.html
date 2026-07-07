@@ -1,128 +1,240 @@
 <!DOCTYPE html>
-<html><head>
+<html lang="en">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>Blind Assist</title>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<title>Blind Assist V2 — Meta AI Navigator</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;color:#fff;font-family:sans-serif;height:100vh;overflow:hidden;position:relative}
-video{width:100%;height:100vh;object-fit:cover;position:absolute;top:0;left:0}
-canvas{position:absolute;top:0;left:0;width:100%;height:100vh}
-#status{position:absolute;top:10px;left:10px;right:10px;padding:10px;text-align:center;font-size:16px;font-weight:bold;border-radius:8px;z-index:10}
-#status.safe{background:rgba(56,142,60,0.85)}
-#status.warning{background:rgba(230,81,0,0.85)}
-#status.danger{background:rgba(183,28,28,0.9)}
-#status.loading{background:rgba(25,118,210,0.85)}
-#guidance{position:absolute;bottom:80px;left:10px;right:10px;padding:14px;text-align:center;font-size:22px;font-weight:bold;background:rgba(0,0,0,0.8);border-radius:10px;z-index:10;display:none}
-#startBtn{position:absolute;bottom:15px;left:50%;transform:translateX(-50%);padding:15px 50px;font-size:22px;font-weight:bold;border:none;border-radius:12px;z-index:10;background:#4caf50;color:#fff;cursor:pointer}
+body{background:#000;color:#fff;font-family:-apple-system,sans-serif;height:100vh;overflow:hidden;touch-action:manipulation}
+video{width:100%;height:100vh;object-fit:cover;position:absolute;top:0;left:0;z-index:1}
+canvas{position:absolute;top:0;left:0;width:100%;height:100vh;z-index:2;pointer-events:none}
+
+#statusBar{position:absolute;top:0;left:0;right:0;padding:10px 15px;font-size:14px;font-weight:bold;z-index:10;display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,0.7)}
+#modeLabel{font-size:13px;opacity:0.8}
+#aiStatus{font-size:11px;color:#4caf50}
+
+#navGuidance{position:absolute;top:50px;left:10px;right:10px;padding:16px;font-size:17px;line-height:1.5;background:rgba(0,0,0,0.88);border-radius:14px;z-index:10;display:none;border-left:4px solid #4caf50;max-height:45vh;overflow-y:auto}
+#navGuidance.speaking{border-left-color:#2196f3}
+
+#modeBar{position:absolute;bottom:100px;left:0;right:0;display:flex;justify-content:center;gap:6px;padding:0 8px;z-index:10}
+.mbtn{padding:10px 12px;border:2px solid #333;border-radius:12px;font-size:11px;font-weight:bold;color:#aaa;cursor:pointer;background:rgba(0,0,0,0.6);text-align:center;transition:all 0.2s}
+.mbtn.active{border-color:#4caf50;color:#fff;background:rgba(76,175,80,0.2)}
+.mbtn:active{transform:scale(0.9)}
+
+#controls{position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;z-index:10}
+#micBtn{width:64px;height:64px;border-radius:50%;border:3px solid #2196f3;background:rgba(33,150,243,0.15);font-size:26px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#micBtn.listening{border-color:#f44336;background:rgba(244,67,54,0.3);animation:pulse 1s infinite}
+#mainBtn{padding:12px 36px;font-size:16px;font-weight:bold;border:none;border-radius:12px;color:#fff;cursor:pointer;background:#4caf50}
+#mainBtn.stop{background:#d32f2f}
+
+#listenIndicator{position:absolute;bottom:170px;left:50%;transform:translateX(-50%);font-size:12px;color:#f44336;font-weight:bold;z-index:10;display:none}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
 </style>
-</head><body>
-<div id="status" class="loading">Loading AI model...</div>
+</head>
+<body>
+<div id="statusBar">
+    <span id="modeLabel">🚶 NAVIGATOR</span>
+    <span id="aiStatus">⚪ Ready</span>
+</div>
+
 <video id="video" autoplay playsinline muted></video>
 <canvas id="canvas"></canvas>
-<div id="guidance"></div>
-<button id="startBtn" onclick="startDetection()">START</button>
+
+<div id="navGuidance"></div>
+<div id="listenIndicator">🎤 Listening...</div>
+
+<div id="modeBar">
+    <div class="mbtn active" onclick="setMode('navigate')">🧭<br>Navigate</div>
+    <div class="mbtn" onclick="setMode('scene')">👁️<br>Scene</div>
+    <div class="mbtn" onclick="setMode('ocr')">📖<br>Read</div>
+    <div class="mbtn" onclick="setMode('identify')">🔍<br>Identify</div>
+    <div class="mbtn" onclick="setMode('crosswalk')">🚦<br>Cross</div>
+</div>
+
+<div id="controls">
+    <button id="micBtn" onclick="toggleMic()">🎤</button>
+    <button id="mainBtn" onclick="toggleMain()">START</button>
+</div>
+
 <script>
-let video=document.getElementById('video'),canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
-let model=null,detecting=false,ws=null;
-let lastSpoken=0,lastObj='';
-async function loadModel(){
-    document.getElementById('status').textContent='Loading AI model (first time ~10s)...';
-    model=await cocoSsd.load({base:'lite_mobilenet_v2'});
-    document.getElementById('status').textContent='Model ready. Tap START';
-    document.getElementById('status').className='safe';
-}
-loadModel();
-function connectWS(){
-    const p=location.protocol==='https:'?'wss:':'ws:';
-    ws=new WebSocket(p+'//'+location.host+'/ws/phone');
-    ws.onopen=()=>console.log('WS connected');
-    ws.onmessage=(e)=>{const m=JSON.parse(e.data);if(m.type==='guidance'){showGuidance(m.text);speak(m.text);}};
-    ws.onclose=()=>setTimeout(connectWS,3000);
-    ws.onerror=()=>ws.close();
-}
-connectWS();
-async function startDetection(){
-    document.getElementById('startBtn').style.display='none';
-    try{
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let isActive = false;
+let currentMode = 'navigate';
+let isAnalyzing = false;
+let autoNavInterval = null;
+let recognition = null;
+let isListening = false;
+
+// ===== CAMERA =====
+async function startCamera() {
+    try {
         let stream;
-        try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'}},audio:false});}
-        catch(e){stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});}
-        video.srcObject=stream;await video.play();
-        canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||480;
-        detecting=true;speak('Assistance started. Point camera forward.');
-        detectLoop();streamLoop();
-    }catch(e){document.getElementById('status').textContent='Camera error: '+e.message;document.getElementById('status').className='danger';}
-}
-async function detectLoop(){
-    if(!detecting||!model)return;
-    const preds=await model.detect(video);
-    drawDetections(preds);analyzeAndWarn(preds);
-    requestAnimationFrame(detectLoop);
-}
-let lastStreamTime=0;
-function streamLoop(){
-    if(!detecting)return;
-    const now=Date.now();
-    if(now-lastStreamTime>200&&ws&&ws.readyState===1){
-        lastStreamTime=now;
-        const c=document.createElement('canvas');c.width=320;c.height=240;
-        c.getContext('2d').drawImage(video,0,0,320,240);
-        const data=c.toDataURL('image/jpeg',0.4).split(',')[1];
-        ws.send(JSON.stringify({type:'frame',data:data,timestamp:now}));
-    }
-    setTimeout(streamLoop,200);
-}
-function drawDetections(preds){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    for(const p of preds){
-        if(p.score<0.5)continue;
-        const [x,y,w,h]=p.bbox;
-        const dist=estimateDistance(h/video.videoHeight,p.class);
-        const risk=getRisk(p,dist);
-        const color=risk==='critical'?'#f44336':risk==='high'?'#ff5722':risk==='medium'?'#ff9800':'#4caf50';
-        ctx.strokeStyle=color;ctx.lineWidth=risk==='critical'?4:risk==='high'?3:2;
-        ctx.strokeRect(x,y,w,h);
-        ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(x,y-24,ctx.measureText(p.class+' '+dist).width+60,22);
-        ctx.fillStyle=color;ctx.font='bold 14px sans-serif';
-        ctx.fillText(p.class+' • '+dist,x+4,y-8);
+        try { stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'},width:{ideal:640}},audio:false}); }
+        catch(e) { stream = await navigator.mediaDevices.getUserMedia({video:true,audio:false}); }
+        video.srcObject = stream;
+        await video.play();
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        return true;
+    } catch(e) {
+        speak('Camera error. ' + e.message);
+        return false;
     }
 }
-function estimateDistance(r,l){const h={'person':1.7,'car':1.5,'bicycle':1.0,'motorcycle':1.1,'bus':3.0,'truck':3.0,'dog':0.5,'cat':0.3,'chair':0.9,'potted plant':0.6};const d=(h[l]||0.8)/(r*2);if(d<1)return'<1m';if(d<2)return'~'+d.toFixed(1)+'m';if(d<4)return'~'+d.toFixed(0)+'m';return'far';}
-function getRisk(pred,dist){const d=parseFloat(dist)||99;const cx=(pred.bbox[0]+pred.bbox[2]/2)/video.videoWidth;const inC=cx>0.3&&cx<0.7;if(dist==='<1m'&&inC)return'critical';if((dist.includes('1')||dist.includes('2'))&&inC)return'high';if(d<3&&inC)return'medium';return'low';}
-function analyzeAndWarn(preds){
-    const now=Date.now(),threats=[];
-    for(const p of preds){if(p.score<0.5)continue;const bh=p.bbox[3]/video.videoHeight;const dist=estimateDistance(bh,p.class);const risk=getRisk(p,dist);const cx=(p.bbox[0]+p.bbox[2]/2)/video.videoWidth;if(risk!=='low')threats.push({label:p.class,dist:dist,risk:risk,cx:cx,direction:cx<0.35?'left':cx>0.65?'right':'center',box_area:(p.bbox[2]*p.bbox[3])/(video.videoWidth*video.videoHeight)});}
-    const s=document.getElementById('status');
-    if(threats.length===0){s.textContent='PATH CLEAR ✓';s.className='safe';}
-    else if(threats.some(t=>t.risk==='critical')){s.textContent='⚠️ DANGER!';s.className='danger';}
-    else if(threats.some(t=>t.risk==='high')){s.textContent='⚠️ WARNING';s.className='warning';}
-    else{s.textContent='SCANNING';s.className='safe';}
-    if(threats.length>0&&now-lastSpoken>3000){
-        const top=threats.sort((a,b)=>rv(b.risk)-rv(a.risk))[0];
-        const dir=top.cx<0.35?'on your left':top.cx>0.65?'on your right':'directly ahead';
-        const action=top.risk==='critical'?'Stop!':top.risk==='high'?'Warning.':'Caution.';
-        const traj=top.cx<0.35?'Move right.':top.cx>0.65?'Move left.':top.risk==='critical'?'Stop now!':'Slow down.';
-        // Check corrections from knowledge graph
-        let correctedMsg=action+' '+top.label+' '+dir+', '+top.dist+'. '+traj;
-        if(latestCorrection&&latestCorrection.includes('suppress')){correctedMsg='';}
-        if(correctedMsg&&(correctedMsg!==lastObj||now-lastSpoken>6000)){speak(correctedMsg);lastObj=correctedMsg;lastSpoken=now;}
-        showGuidance(traj);
-    }else if(threats.length===0){hideGuidance();}
-    if(ws&&ws.readyState===1&&threats.length>0){ws.send(JSON.stringify({type:'detections',data:{objects:threats}}));}
+
+// ===== MAIN CONTROL =====
+async function toggleMain() {
+    if (!isActive) {
+        const ok = await startCamera();
+        if (!ok) return;
+        isActive = true;
+        document.getElementById('mainBtn').textContent = 'STOP';
+        document.getElementById('mainBtn').classList.add('stop');
+        speak('Navigator started. Analyzing your path.');
+        setMode('navigate');
+        // Auto-navigate every 8 seconds
+        triggerAnalysis();
+        autoNavInterval = setInterval(() => {
+            if (currentMode === 'navigate' && isActive && !isAnalyzing) {
+                triggerAnalysis();
+            }
+        }, 8000);
+    } else {
+        isActive = false;
+        clearInterval(autoNavInterval);
+        document.getElementById('mainBtn').textContent = 'START';
+        document.getElementById('mainBtn').classList.remove('stop');
+        document.getElementById('navGuidance').style.display = 'none';
+        speak('Navigator stopped.');
+    }
 }
-// Fetch corrections from knowledge graph every 10s
-let latestCorrection='';
-setInterval(async()=>{
-    try{const r=await fetch('/api/corrections');const d=await r.json();
-    if(d.corrections&&d.corrections.length>0)latestCorrection=d.corrections[0].text;
-    }catch(e){}
-},10000);
-function rv(r){return r==='critical'?4:r==='high'?3:r==='medium'?2:1;}
-function showGuidance(t){const g=document.getElementById('guidance');g.textContent=t;g.style.display='block';}
-function hideGuidance(){document.getElementById('guidance').style.display='none';}
-function speak(t){const u=new SpeechSynthesisUtterance(t);u.rate=1.0;u.volume=1.0;speechSynthesis.cancel();speechSynthesis.speak(u);}
+
+// ===== MODE =====
+function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mbtn').forEach((b,i) => {
+        const modes = ['navigate','scene','ocr','identify','crosswalk'];
+        b.classList.toggle('active', modes[i] === mode);
+    });
+    const labels = {navigate:'🧭 NAVIGATOR', scene:'👁️ SCENE', ocr:'📖 READING', identify:'🔍 IDENTIFY', crosswalk:'🚦 CROSSING'};
+    document.getElementById('modeLabel').textContent = labels[mode] || mode;
+
+    if (isActive) triggerAnalysis();
+}
+
+// ===== CAPTURE & ANALYZE =====
+function captureFrame() {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 384;
+    c.getContext('2d').drawImage(video, 0, 0, 512, 384);
+    return c.toDataURL('image/jpeg', 0.6).split(',')[1];
+}
+
+async function triggerAnalysis() {
+    if (isAnalyzing || !isActive) return;
+    isAnalyzing = true;
+    document.getElementById('aiStatus').textContent = '🟡 Analyzing...';
+
+    const frame = captureFrame();
+    const endpoint = '/api/' + currentMode;
+
+    try {
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({frame})
+        });
+        const data = await resp.json();
+
+        let text = data.guidance || data.description || data.text || 'No response.';
+        showGuidance(text);
+        speak(text);
+        document.getElementById('aiStatus').textContent = '🟢 Live';
+    } catch(e) {
+        document.getElementById('aiStatus').textContent = '🔴 Error';
+        speak('Analysis failed.');
+    }
+
+    isAnalyzing = false;
+}
+
+// ===== UI =====
+function showGuidance(text) {
+    const el = document.getElementById('navGuidance');
+    el.textContent = text;
+    el.style.display = 'block';
+    el.classList.add('speaking');
+    setTimeout(() => el.classList.remove('speaking'), 3000);
+}
+
+// ===== VOICE =====
+function speak(text) {
+    if (!text) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95; u.volume = 1.0; u.pitch = 1.0;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+}
+
+function toggleMic() {
+    if (isListening) { stopMic(); return; }
+    startMic();
+}
+
+function startMic() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { speak('Voice not supported.'); return; }
+    recognition = new SR();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+        isListening = true;
+        document.getElementById('micBtn').classList.add('listening');
+        document.getElementById('listenIndicator').style.display = 'block';
+    };
+    recognition.onresult = (e) => {
+        const text = e.results[0][0].transcript.toLowerCase();
+        handleVoice(text);
+    };
+    recognition.onend = () => stopMic();
+    recognition.onerror = () => stopMic();
+    recognition.start();
+}
+
+function stopMic() {
+    isListening = false;
+    if (recognition) recognition.stop();
+    document.getElementById('micBtn').classList.remove('listening');
+    document.getElementById('listenIndicator').style.display = 'none';
+}
+
+function handleVoice(text) {
+    if (text.includes('navigate') || text.includes('where') || text.includes('path') || text.includes('walk')) {
+        setMode('navigate');
+    } else if (text.includes('scene') || text.includes('describe') || text.includes('around') || text.includes('what do you see')) {
+        setMode('scene');
+    } else if (text.includes('read') || text.includes('text') || text.includes('sign')) {
+        setMode('ocr');
+    } else if (text.includes('what is') || text.includes('identify') || text.includes('holding')) {
+        setMode('identify');
+    } else if (text.includes('cross') || text.includes('road') || text.includes('traffic') || text.includes('light')) {
+        setMode('crosswalk');
+    } else if (text.includes('stop') || text.includes('pause')) {
+        if (isActive) toggleMain();
+    } else if (text.includes('start') || text.includes('go')) {
+        if (!isActive) toggleMain();
+    } else if (text.includes('help')) {
+        speak('Commands: Where do I walk. Describe scene. Read text. What is this. Cross road. Start. Stop. Help.');
+    } else {
+        speak('Say: Where do I walk, Describe scene, Read text, What is this, or Help.');
+    }
+}
 </script>
-</body></html>
+</body>
+</html>
